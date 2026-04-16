@@ -46,6 +46,8 @@ export const api = {
     request<{ success: true }>(`/api/boards/${boardId}/config`, { method: 'PATCH', body: JSON.stringify(config) }),
   getPoolStatus: (boardId: number) => request<PoolStatus>(`/api/boards/${boardId}/pool`),
   seedTasks: (boardId: number) => request<{ created: number }>(`/api/boards/${boardId}/seed-tasks`, { method: 'POST' }),
+  suggestTasks: (boardId: number) =>
+    request<{ created: number; cards: Card[] }>(`/api/boards/${boardId}/suggest-tasks`, { method: 'POST' }),
 
   // Cards
   getCard: (id: number) => request<CardDetail>(`/api/cards/${id}`),
