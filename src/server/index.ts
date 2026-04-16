@@ -34,13 +34,13 @@ import {
   reorderChainCards,
 } from '../db/queries.js';
 import { getBlockers, getDependents } from '../db/deps.js';
-import { spawnSpecGeneration, spawnImplementation, spawnPlanner, buildClaudeArgs, parseStreamJsonOutput } from '../spawner.js';
+import { spawnSpecGeneration, spawnImplementation, spawnPlanner } from '../spawner.js';
 import { PIPELINE_COLUMNS } from '../types.js';
 import { agentPool } from '../pool.js';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
-import { exec, execSync, spawn } from 'child_process';
+import { exec, execSync } from 'child_process';
 import { setupPtyWebSocket, cleanupAllPtySessions } from './pty.js';
 import { killProcess } from './process-registry.js';
 
@@ -475,188 +475,107 @@ export function startDashboardServer(dbPath: string, port: number): Promise<numb
     return c.json(result);
   });
 
-  // ── Seed tasks ──
-  // Product roadmap items for dev experience and Claude Code productivity
-  const SEED_TASKS = [
-    { title: 'Auto-pickup: agents claim idle cards autonomously', description: 'Add an MCP tool (antfarm_get_next_available) that returns the highest-priority unblocked idle card. Agents poll this to autonomously pick up work from Idea/Approved columns, respecting dependency order.', context: 'src/mcp/server.ts has tool registration. src/db/deps.ts checks dependencies. Add priority ordering by card position.' },
-    { title: 'Parallel agent pool with configurable concurrency', description: 'Spawn N agents working on independent cards simultaneously. Add a pool manager tracking active count and queuing work at capacity. Expose concurrency setting in board config.', context: 'spawner.ts spawns one process per card with no limits. Add a pool module with configurable max concurrent claude processes.' },
-    { title: 'Spec templates per task type', description: 'Let users choose a spec template when creating a task (API endpoint, UI component, refactor, bugfix). Each template guides Claude with targeted prompts for that task type.', context: 'Spec prompt is hardcoded in spawner.ts spawnSpecGeneration(). Add template dropdown to CreateTaskModal.tsx, store template type in card.context field.' },
-    { title: 'Implementation plan preview before building', description: 'After approving a spec, show a dry-run plan (files to create/modify, estimated scope) before committing to the full build. User reviews the plan before the agent starts coding.', context: 'Add a step between Approved and Building. Spawn claude with a lighter prompt for just the plan. Store as structured note. Show in CardDetail before allowing build.' },
-    { title: 'Test generation and validation gate', description: 'Auto-generate tests during implementation. Run them and show pass/fail in the review phase. Block cards from Done if tests fail.', context: 'Modify implementation prompt in spawner.ts to require tests. Parse codex review output for test results. Add test_status to card notes.' },
-    { title: 'Quick board filters and persistent search', description: 'Add filter bar to filter cards by agent_status, spec_status, or text search. Persist filter state in URL params so filters survive page refresh.', context: 'Board gets crowded. CommandPalette (Cmd+K) exists but no persistent filtering. Add filter state to App.tsx, pass to Board for cardsByColumn filtering.' },
-    { title: 'Global activity feed panel', description: 'Toggleable side panel showing real-time scrolling feed of all agent actions across the board: specs generated, builds started, errors, PR submissions.', context: 'activity_log table has all events. SSE poller already broadcasts them. Add collapsible panel in App.tsx subscribing to SSE events with timeline UI.' },
-    { title: 'Desktop notifications for key events', description: 'Browser desktop notifications when a spec is ready, implementation completes, or an agent errors. Respect browser permission, add a toggle in header.', context: 'Use Web Notifications API. Hook into SSE events in useSSE.ts — on card.spec_ready or card.errored events, show notification.' },
-    { title: 'Auto-branch creation when building starts', description: 'Automatically create and checkout a feature branch named from card title (e.g. feat/add-oauth-login) when a card moves to Building.', context: 'simple-git is already a dependency. In spawnImplementation(), create branch before spawning claude. Store in card.git_branch. Slugify title.' },
-    { title: 'GitHub PR status sync on cards', description: 'Poll GitHub for PR review status (approved, changes requested, merged) and reflect on the card badge. Auto-move to Done when PR merges.', context: 'Cards have pr_url field. Use GitHub API or gh CLI. Add poller in server/index.ts alongside stale-card watchdog.' },
-    { title: 'Board analytics dashboard', description: 'Charts showing throughput (cards done/week), average time per stage, agent success rate, and error rate over time.', context: 'activity_log has timestamps for all transitions. Query durations by diffing consecutive card.moved events. Render with recharts or SVG.' },
-    { title: 'Card time tracking with stage duration badges', description: 'Track time per pipeline stage. Show elapsed time badges on cards and a stage timeline in card detail modal.', context: 'activity_log records card.moved events. Compute durations by diffing consecutive transitions. Show relative time (2h, 3d) on badges.' },
-    { title: 'MCP tool: request human review', description: 'Add antfarm_request_human_review so agents can pause and flag a card for human attention with a specific question, setting agent_status=waiting.', context: 'Add to src/mcp/server.ts. Set status to waiting, add note with question, highlight waiting cards with distinct badge in dashboard.' },
-    { title: 'MCP tool: split card into subtasks', description: 'Add antfarm_split_card so agents can decompose a large card into smaller sub-cards during speccing, with dependency links between parent and children.', context: 'Add to src/mcp/server.ts. Create new cards in Idea column linked via card_deps. Show children in parent CardDetail.' },
-    { title: 'Card dependency visualization in detail view', description: 'Render blocking relationships as a visual graph in card detail. Show blockers and dependents with status indicators and clickable links.', context: 'card_deps table tracks dependencies. CardDetail fetches blockers/dependents but does not display them. Add a simple DAG visualization.' },
-    { title: 'Bulk card operations with multi-select', description: 'Select multiple cards (Shift+click) and perform bulk move, archive, or re-spec. Show floating action bar when multiple cards are selected.', context: 'All card actions are one-at-a-time. No multi-select in Board.tsx. Add selection state and batch API endpoints.' },
-    { title: 'Webhook notifications for Slack/Discord/CI', description: 'Emit webhooks on card state transitions. Add webhooks config per board with URL and event filter.', context: 'SSE broadcasts internally. Add webhooks table (board_id, url, events). On broadcastSSE, POST to configured URLs.' },
-    { title: 'Board-level CLAUDE.md editor', description: 'Inline editor in board settings to view and edit the project CLAUDE.md directly from the dashboard.', context: 'GET /api/boards/:id/context scans for CLAUDE.md files. Add write endpoint and Monaco-style editor component.' },
-    { title: 'Graceful shutdown with agent state preservation', description: 'On server stop, safely pause running agents and persist state for resume on restart instead of killing processes.', context: 'process.on SIGTERM calls cleanupAllPtySessions. Extend to update working cards to paused state with resume info.' },
-    { title: 'Health check endpoint and status page', description: 'Add GET /api/health returning DB status, uptime, active agent count, total cards, version. Add a /status page in the UI.', context: 'No health endpoint exists. Server on Hono port 4800. Active agents = cards with agent_status=working.' },
-  ];
-
-  app.post('/api/boards/:id/seed-tasks', (c) => {
+  // ── suggest tasks: uses claude to analyze the codebase and generate 5 high-impact tasks ──
+  app.post('/api/boards/:id/seed-tasks', async (c) => {
     const boardId = Number(c.req.param('id'));
     const result = getBoardWithColumns(db, boardId);
     if (!result) return c.json({ error: 'Board not found' }, 404);
 
     const { columns } = result;
+    const board = db.prepare('SELECT * FROM boards WHERE id = ?').get(boardId) as any;
     const ideaColumn = columns.find(col => col.name === 'Idea');
     if (!ideaColumn) return c.json({ error: 'Board has no Idea column' }, 400);
 
-    const existingCards = db
-      .prepare('SELECT title FROM cards WHERE column_id = ? AND archived = 0')
-      .all(ideaColumn.id) as { title: string }[];
-    const existingTitles = new Set(existingCards.map(c => c.title));
+    // gather existing card titles to avoid duplicates
+    const allCards = db
+      .prepare('SELECT title FROM cards WHERE archived = 0')
+      .all() as { title: string }[];
+    const existingTitles = allCards.map(c => c.title).join('\n');
 
-    const created: any[] = [];
-    let skipped = 0;
+    const projectDir = board?.directory;
+    if (!projectDir) return c.json({ error: 'Board has no directory set' }, 400);
 
-    for (const task of SEED_TASKS) {
-      if (existingTitles.has(task.title)) {
-        skipped++;
-        continue;
-      }
-      const card = createCard(db, {
-        column_id: ideaColumn.id,
-        title: task.title,
-        description: task.description,
-        context: task.context,
-      });
-      created.push(card);
-    }
-
-    if (created.length > 0) {
-      broadcastSSE({ type: 'board.updated', data: { board_id: boardId } });
-    }
-
-    return c.json({ created: created.length, skipped, cards: created });
-  });
-
-  // ── Suggest tasks (AI-powered codebase analysis) ──
-  app.post('/api/boards/:id/suggest-tasks', async (c) => {
-    const boardId = Number(c.req.param('id'));
-    const result = getBoardWithColumns(db, boardId);
-    if (!result) return c.json({ error: 'Board not found' }, 404);
-    if (!result.board.directory) return c.json({ error: 'Board has no directory set' }, 400);
-
-    const { columns } = result;
-    const directory = result.board.directory!;
-    const ideaColumn = columns.find(col => col.name === 'Idea');
-    if (!ideaColumn) return c.json({ error: 'Board has no Idea column' }, 400);
-
-    // Get all non-archived card titles for deduplication
-    const existingCards = db.prepare(
-      `SELECT c.title FROM cards c
-       JOIN columns col ON col.id = c.column_id
-       WHERE col.board_id = ? AND c.archived = 0`
-    ).all(boardId) as { title: string }[];
-    const existingTitlesSet = new Set(existingCards.map(c => c.title.toLowerCase()));
-
-    // Get recent git log for context
-    let gitLog = '';
-    try {
-      gitLog = execSync('git log --oneline -50', { cwd: directory, timeout: 5000, stdio: 'pipe' }).toString().trim();
-    } catch { /* not a git repo or dir doesn't exist */ }
-
-    const existingTitlesList = existingCards.map(c => c.title).join('\n- ');
-
+    // use claude haiku to generate 5 task suggestions with effort scores
     const prompt = [
-      `You are an expert software engineer analyzing a codebase to suggest high-impact improvements.`,
-      ``,
-      `First: read all CLAUDE.md files in this project to understand the codebase, patterns, and conventions.`,
-      `Then: analyze the codebase structure, patterns, and recent development activity.`,
-      ``,
-      `## Recent git history:`,
-      gitLog || '(no git history available)',
-      ``,
-      `## Existing tasks on the board (avoid duplicates):`,
-      existingTitlesList ? `- ${existingTitlesList}` : '(no existing tasks)',
-      ``,
-      `## Instructions:`,
-      `Generate exactly 5 high-impact task suggestions. Focus on:`,
-      `- Agent coordination improvements`,
-      `- Pipeline automation enhancements`,
-      `- Feedback loops and iteration speed`,
-      `- Developer productivity for Claude Code users`,
-      `- Code quality, testing, and reliability improvements`,
-      ``,
-      `Each task should be specific, actionable, and grounded in the actual codebase.`,
-      `Do NOT suggest tasks that duplicate or overlap with existing tasks listed above.`,
-      ``,
-      `Output ONLY a valid JSON array of exactly 5 objects, each with "title" and "description" fields.`,
-      `The title should be concise (under 80 chars). The description should be 2-3 sentences explaining what to build and why.`,
-      `No markdown fences, no explanation — just the JSON array.`,
+      'you are analyzing a codebase to suggest 5 features that would seriously help claude code users.',
+      'read the CLAUDE.md and understand what this project does first.',
+      '',
+      'each task MUST include an effort score in the title like: "[0.3] feature name"',
+      'effort scale (how long claude code takes to implement):',
+      '  0.3 = ~1 min, trivial change (add a button, tweak a prompt, add a css class)',
+      '  0.5 = ~2 min, small feature (new api endpoint, new ui component, config option)',
+      '  0.7 = ~3 min, medium feature (new workflow, integration, multi-file change)',
+      '  1.0 = ~4 min, larger feature (new system, complex logic, multiple components)',
+      '',
+      'mix of efforts: 2 tasks at 0.3-0.5, 2 at 0.5-0.7, 1 at 0.7-1.0',
+      'every task should be genuinely interesting and useful. no boring boilerplate.',
+      'think: what would make a developer say "oh thats sick" when they see it working.',
+      '',
+      'focus areas: agent intelligence, developer experience, real-time feedback,',
+      'smart defaults, delightful interactions, workflow automation, observability.',
+      '',
+      'existing tasks (do NOT duplicate these):',
+      existingTitles || '(none)',
+      '',
+      'output exactly 5 tasks as a JSON array. each object has:',
+      '  "title": "[effort] short name" (include effort score in brackets)',
+      '  "description": 2-3 sentences on what to build and why its cool.',
+      'output ONLY the JSON array. no markdown, no explanation.',
     ].join('\n');
 
     try {
-      const agentOutput = await new Promise<string>((resolve, reject) => {
-        const child = spawn('claude', buildClaudeArgs(prompt), {
-          cwd: directory,
-          stdio: ['ignore', 'pipe', 'pipe'],
-          env: { ...process.env },
-        });
+      const claudeOutput = execSync(
+        `claude -p "${prompt.replace(/"/g, '\\"').replace(/\n/g, '\\n')}" --output-format json --model haiku`,
+        { cwd: projectDir, timeout: 60000, stdio: 'pipe' }
+      ).toString().trim();
 
-        let stdout = '';
-        let stderr = '';
-        child.stdout?.on('data', (chunk: Buffer) => { stdout += chunk.toString(); });
-        child.stderr?.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
+      // parse the json output
+      const parsed = JSON.parse(claudeOutput);
+      const text = parsed.result || claudeOutput;
 
-        child.on('error', (err) => reject(err));
-        child.on('close', (code) => {
-          if (code !== 0) {
-            reject(new Error(stderr.trim() || `Claude process exited with code ${code}`));
-            return;
-          }
-          const { resultText } = parseStreamJsonOutput(stdout);
-          resolve(resultText);
-        });
-      });
-
-      // Parse the JSON array of tasks
+      // extract json array from the response
       let tasks: { title: string; description: string }[] = [];
       try {
-        tasks = JSON.parse(agentOutput.trim());
+        // try parsing directly
+        const arr = JSON.parse(text);
+        if (Array.isArray(arr)) tasks = arr;
       } catch {
-        // Regex fallback: extract JSON array from output
-        const match = agentOutput.match(/\[[\s\S]*\]/);
+        // try finding json array in the text
+        const match = text.match(/\[[\s\S]*\]/);
         if (match) {
           try { tasks = JSON.parse(match[0]); } catch {}
         }
       }
 
-      if (!Array.isArray(tasks) || tasks.length === 0) {
-        return c.json({ error: 'Could not parse suggestions from agent output' }, 500);
+      if (tasks.length === 0) {
+        return c.json({ error: 'Failed to generate tasks. Try again.' }, 500);
       }
 
-      // Create cards, skipping duplicates
+      const existingSet = new Set(allCards.map(c => c.title.toLowerCase()));
       const created: any[] = [];
-      for (const task of tasks) {
-        if (!task.title || !task.description) continue;
-        if (existingTitlesSet.has(task.title.toLowerCase())) continue;
+      let skipped = 0;
 
+      for (const task of tasks.slice(0, 5)) {
+        if (!task.title || existingSet.has(task.title.toLowerCase())) {
+          skipped++;
+          continue;
+        }
         const card = createCard(db, {
           column_id: ideaColumn.id,
           title: task.title,
-          description: task.description,
+          description: task.description || '',
         });
         created.push(card);
-        // Track the new title so subsequent tasks in the same batch don't duplicate
-        existingTitlesSet.add(task.title.toLowerCase());
       }
 
       if (created.length > 0) {
         broadcastSSE({ type: 'board.updated', data: { board_id: boardId } });
       }
 
-      return c.json({ created: created.length, cards: created });
+      return c.json({ created: created.length, skipped, cards: created });
     } catch (err: any) {
-      return c.json({ error: `Failed to generate suggestions: ${err.message}` }, 500);
+      const msg = err.stderr?.toString()?.trim() || err.message || 'Failed to generate tasks';
+      return c.json({ error: msg }, 500);
     }
   });
 
