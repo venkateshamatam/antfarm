@@ -94,15 +94,18 @@ function makeReleaser(boardId: number | undefined, cardId: number): () => void {
   };
 }
 
-// Converts a card title into a valid git branch name with feat/ prefix.
-// Lowercases, replaces non-alphanumeric chars with hyphens, deduplicates
-// hyphens, trims, and truncates to 60 chars.
+// converts a card title into a short git branch name.
+// extracts 3-4 meaningful words, skips filler words, max 30 chars.
 export function slugifyBranch(title: string): string {
-  const slug = title
+  const stopWords = new Set(['the', 'a', 'an', 'and', 'or', 'to', 'in', 'on', 'for', 'of', 'with', 'is', 'it', 'its', 'this', 'that', 'be', 'as', 'at', 'by', 'so', 'do', 'if', 'from', 'not', 'but', 'all', 'can', 'has', 'have', 'will', 'just', 'should', 'would', 'could', 'please', 'make', 'add', 'create', 'implement', 'update', 'fix', 'also', 'more', 'very', 'too', 'little', 'big', 'bigger', 'page', 'here', 'there', 'when', 'then', 'some', 'each', 'every', 'new', 'get', 'set']);
+  const words = title
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 60);
+    .replace(/[^a-z0-9\s]/g, '')
+    .split(/\s+/)
+    .filter(w => w.length > 1 && !stopWords.has(w))
+    .slice(0, 4);
+
+  const slug = words.join('-').slice(0, 30).replace(/-+$/, '');
   return `feat/${slug || 'task'}`;
 }
 

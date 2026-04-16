@@ -3,8 +3,8 @@ import { toast } from 'sonner'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import {
-  Check, Trash2, RotateCcw, TerminalSquare, ExternalLink,
-  GitBranch, Plus, AlertTriangle, Loader2, Undo2, Cpu, Link2,
+  Check, Trash2, RotateCcw, TerminalSquare, ExternalLink, X,
+  GitBranch, Plus, AlertTriangle, Loader2, Undo2, Cpu, Link2, Send, GitPullRequest,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -25,6 +25,7 @@ import {
   useModels, useChain, useReorderChain, useRemoveCardFromChain, useCreateChain, useAddCardToChain,
 } from '../hooks/useBoards'
 import type { Note, Subtask, CardDetail as CardDetailType, ImplementationPlan } from '../types'
+import { api } from '../api'
 import { stageColor, stageLabel, type PipelineStage } from '../types'
 
 export function CardDetailDialog({ boardId }: { boardId: number }) {
@@ -317,9 +318,130 @@ function CardDetailContent({
                 <ExternalLink className="h-3 w-3 mr-1" /> View PR
               </Button>
             )}
+
+            {/* create PR: card has a branch, is completed, no PR yet */}
+            {card.git_branch && !card.pr_url && card.agent_status === 'completed' && (
+              <CreatePrInline cardId={card.id} />
+            )}
+
+            {/* work on PR: card has a branch and a PR, not currently working */}
+            {card.git_branch && card.pr_url && card.agent_status !== 'working' && (
+              <WorkOnPrInline cardId={card.id} />
+            )}
           </>
         )}
       </div>
+    </div>
+  )
+}
+
+function CreatePrInline({ cardId }: { cardId: number }) {
+  const [open, setOpen] = useState(false)
+  const [baseBranch, setBaseBranch] = useState('')
+  const [branches, setBranches] = useState<string[]>([])
+  const [defaultBranch, setDefaultBranch] = useState('main')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+
+  // fetch branches when expanded
+  useEffect(() => {
+    if (!open) return
+    api.request<{ branches: string[]; default: string }>(`/api/cards/${cardId}/branches`)
+      .then(data => {
+        setBranches(data.branches)
+        setDefaultBranch(data.default)
+        setBaseBranch(data.default)
+      })
+      .catch(() => setBranches(['main']))
+  }, [open, cardId])
+
+  if (!open) {
+    return (
+      <Button size="sm" onClick={() => setOpen(true)}>
+        <GitPullRequest className="h-3 w-3 mr-1" /> Create PR
+      </Button>
+    )
+  }
+
+  const submit = async () => {
+    setLoading(true)
+    setError('')
+    try {
+      const result = await api.request<{ pr_url: string; title: string }>(`/api/cards/${cardId}/create-pr`, {
+        method: 'POST',
+        body: JSON.stringify({ base: baseBranch || defaultBranch }),
+      })
+      toast.success(`PR created: ${result.title}`)
+      setOpen(false)
+    } catch (err: any) {
+      setError(err.message || 'Failed to create PR')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="flex gap-2 items-center flex-wrap">
+      <select
+        value={baseBranch}
+        onChange={(e) => setBaseBranch(e.target.value)}
+        className="h-8 text-xs rounded-md border border-border bg-background px-2"
+      >
+        {branches.length > 0 ? (
+          branches.map(b => <option key={b} value={b}>{b}</option>)
+        ) : (
+          <option value="main">main</option>
+        )}
+      </select>
+      <Button size="sm" onClick={submit} disabled={loading}>
+        {loading ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <GitPullRequest className="h-3 w-3 mr-1" />}
+        {loading ? 'Creating PR...' : 'Create PR'}
+      </Button>
+      <Button size="sm" variant="ghost" onClick={() => setOpen(false)}>
+        <X className="h-3 w-3" />
+      </Button>
+      {error && <span className="text-xs text-destructive">{error}</span>}
+    </div>
+  )
+}
+
+function WorkOnPrInline({ cardId }: { cardId: number }) {
+  const [open, setOpen] = useState(false)
+  const [prompt, setPrompt] = useState('')
+
+  if (!open) {
+    return (
+      <Button size="sm" variant="outline" onClick={() => setOpen(true)}>
+        <Send className="h-3 w-3 mr-1" /> Work on PR
+      </Button>
+    )
+  }
+
+  const submit = async () => {
+    if (!prompt.trim()) return
+    try {
+      await api.request(`/api/cards/${cardId}/work-on-pr`, {
+        method: 'POST', body: JSON.stringify({ prompt: prompt.trim() }),
+      })
+      toast.success('Claude is working on it')
+      setPrompt('')
+      setOpen(false)
+    } catch (err: any) { toast.error(err.message || 'Failed') }
+  }
+
+  return (
+    <div className="flex gap-2 items-center">
+      <Input
+        autoFocus
+        value={prompt}
+        onChange={(e) => setPrompt(e.target.value)}
+        onKeyDown={(e) => { if (e.key === 'Enter') submit(); if (e.key === 'Escape') setOpen(false); }}
+        placeholder="what should claude change?"
+        className="h-8 text-sm"
+      />
+      <Button size="sm" onClick={submit} disabled={!prompt.trim()}>
+        <Send className="h-3 w-3" />
+      </Button>
     </div>
   )
 }
