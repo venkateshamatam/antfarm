@@ -1181,56 +1181,86 @@ export function startDashboardServer(dbPath: string, port: number): Promise<numb
     const baseBranch = body.base || '';
 
     try {
+      const pipeOpts = { cwd, timeout: 10000, stdio: 'pipe' as const };
+
       // commit any uncommitted changes
       try {
-        execSync('git add -A && git commit -m "agent: implement changes"', { cwd, timeout: 10000, stdio: 'pipe' });
+        execSync('git add -A', { ...pipeOpts });
+        // use the diff to generate a meaningful commit message
+        const shortDiff = execSync('git diff --cached --stat', pipeOpts).toString().trim();
+        const commitMsg = shortDiff
+          ? shortDiff.split('\n').pop()?.trim() || 'update files'
+          : 'update files';
+        execSync(`git commit -m "${commitMsg}"`, pipeOpts);
       } catch { /* nothing to commit is fine */ }
 
       // push the branch
-      const branch = card.git_branch || execSync('git branch --show-current', { cwd, timeout: 5000 }).toString().trim();
-      execSync(`git push -u origin ${branch}`, { cwd, timeout: 30000, stdio: 'pipe' });
+      const branch = card.git_branch || execSync('git branch --show-current', pipeOpts).toString().trim();
+      execSync(`git push -u origin ${branch}`, { ...pipeOpts, timeout: 30000 });
 
-      // generate pr title and description from the actual diff
-      const baseFlag = baseBranch ? ` --base ${baseBranch}` : '';
+      // get the diff for claude to summarize
       const baseRef = baseBranch || 'main';
-      let diffStat = '';
+      const baseFlag = baseBranch ? ` --base ${baseBranch}` : '';
+      let diff = '';
       try {
-        diffStat = execSync(`git diff ${baseRef}...${branch} --stat`, { cwd, timeout: 5000, stdio: 'pipe' }).toString().trim();
+        diff = execSync(`git diff ${baseRef}...${branch}`, { ...pipeOpts, timeout: 10000 }).toString();
       } catch {
-        try { diffStat = execSync(`git diff HEAD~5 --stat`, { cwd, timeout: 5000, stdio: 'pipe' }).toString().trim(); } catch {}
+        try { diff = execSync('git diff HEAD~5', pipeOpts).toString(); } catch {}
       }
+      // truncate diff to 8k chars to keep the prompt small
+      if (diff.length > 8000) diff = diff.slice(0, 8000) + '\n... (truncated)';
 
-      // use claude to generate a proper pr title and description from the diff
+      let diffStat = '';
+      try { diffStat = execSync(`git diff ${baseRef}...${branch} --stat`, pipeOpts).toString().trim(); } catch {}
+
+      // use claude to generate pr title and description from the actual code changes
       let prTitle = '';
       let prBody = '';
       try {
-        const diffContent = execSync(`git log ${baseRef}..${branch} --oneline`, { cwd, timeout: 5000, stdio: 'pipe' }).toString().trim();
-        // summarize from commit messages + stat
-        const commits = diffContent.split('\n').filter(Boolean);
-        if (commits.length > 0) {
-          // extract a clean title from the commits
-          prTitle = commits.length === 1
-            ? commits[0].replace(/^[a-f0-9]+\s+/, '')
-            : `${commits[0].replace(/^[a-f0-9]+\s+/, '')} (+${commits.length - 1} more)`;
-        }
-        prBody = [
-          '## Changes',
+        const prompt = [
+          'generate a pull request title and description for these code changes.',
+          'output exactly two sections separated by ---',
+          'first line: a short PR title (max 72 chars, no prefix, describe what changed)',
+          'then ---',
+          'then the PR description in markdown with: ## summary (2-3 sentences), ## changes (bullet list of what was added/modified/removed)',
           '',
-          ...commits.map(c => `- ${c.replace(/^[a-f0-9]+\s+/, '')}`),
-          '',
-          '## Files changed',
-          '```',
+          'diff stat:',
           diffStat,
-          '```',
+          '',
+          'diff:',
+          diff,
         ].join('\n');
+
+        const claudeOutput = execSync(
+          `claude -p "${prompt.replace(/"/g, '\\"').replace(/\n/g, '\\n')}" --output-format json --model haiku`,
+          { ...pipeOpts, timeout: 60000 }
+        ).toString().trim();
+
+        // parse claude json output
+        const parsed = JSON.parse(claudeOutput);
+        const text = parsed.result || claudeOutput;
+        const parts = text.split('---');
+        if (parts.length >= 2) {
+          prTitle = parts[0].trim().replace(/^#+\s*/, '').replace(/^title:\s*/i, '');
+          prBody = parts.slice(1).join('---').trim();
+        } else {
+          prTitle = text.split('\n')[0].trim();
+          prBody = text;
+        }
       } catch {
+        // fallback: use card title and spec
         prTitle = card.title;
-        prBody = card.spec ? card.spec.slice(0, 500) : 'Implemented by Antfarm agent';
+        prBody = card.spec ? card.spec.slice(0, 500) : '';
       }
 
-      if (!prTitle) prTitle = card.title;
+      if (!prTitle || prTitle === 'agent: implement changes') prTitle = card.title;
 
-      // create the PR - write title and body to temp files to avoid shell escaping issues
+      // append file stats to description
+      if (diffStat) {
+        prBody += '\n\n## files changed\n```\n' + diffStat + '\n```';
+      }
+
+      // create the PR via temp files to avoid shell escaping
       const tmpDir = require('os').tmpdir();
       const titleFile = path.join(tmpDir, `antfarm-pr-title-${cardId}.txt`);
       const bodyFile = path.join(tmpDir, `antfarm-pr-body-${cardId}.txt`);
@@ -1239,10 +1269,9 @@ export function startDashboardServer(dbPath: string, port: number): Promise<numb
 
       const prOutput = execSync(
         `gh pr create --title "$(cat ${titleFile})" --body-file ${bodyFile} --head ${branch}${baseFlag}`,
-        { cwd, timeout: 20000, stdio: 'pipe' }
+        { ...pipeOpts, timeout: 20000 }
       ).toString().trim();
 
-      // cleanup temp files
       try { fs.unlinkSync(titleFile); fs.unlinkSync(bodyFile); } catch {}
 
       // extract PR url from gh output
