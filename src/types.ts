@@ -113,6 +113,7 @@ export interface Card {
   chain_id: number | null;
   chain_position: number | null;
   model: ModelName | null;
+  auto_pilot: boolean;
 }
 
 export interface CardDep {

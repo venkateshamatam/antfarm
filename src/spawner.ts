@@ -433,6 +433,29 @@ export function spawnSpecGeneration(card: Card, projectDir: string, dbPath: stri
         }
 
         addNote(db, card.id, 'Spec generated successfully', 'agent', 'status_change');
+
+        // Auto-pilot: if enabled, auto-approve spec and trigger plan generation
+        const freshCard = getCard(db, card.id);
+        if (freshCard?.auto_pilot) {
+          try {
+            const col = db.prepare('SELECT board_id FROM columns WHERE id = ?').get(freshCard.column_id) as { board_id: number } | undefined;
+            const boardRow = col ? db.prepare('SELECT * FROM boards WHERE id = ?').get(col.board_id) as any : null;
+
+            if (boardRow?.directory) {
+              const planningCol = db.prepare("SELECT id FROM columns WHERE board_id = ? AND name = 'Planning'").get(boardRow.id) as { id: number } | undefined;
+              if (planningCol) {
+                db.prepare("UPDATE cards SET column_id = ?, spec_status = 'approved', plan_status = 'generating', agent_status = 'working', updated_at = datetime('now') WHERE id = ?")
+                  .run(planningCol.id, freshCard.id);
+              }
+              addNote(db, freshCard.id, 'Auto-pilot: spec approved, starting plan generation', 'agent', 'status_change');
+              db.prepare("INSERT INTO activity_log (card_id, action, actor, details_json) VALUES (?, 'card.auto_approved', 'agent', ?)")
+                .run(freshCard.id, JSON.stringify({ stage: 'spec' }));
+
+              const autoPilotModel = getEffectiveModel(db, freshCard.id);
+              spawnPlanner(freshCard, boardRow.directory, dbPath, { model: autoPilotModel });
+            }
+          } catch { /* auto-pilot advance is non-critical */ }
+        }
       } else {
         const errorMsg = stderr.trim() || `Claude Code exited with code ${code}`;
         addNote(db, card.id, `Spec generation failed: ${errorMsg}`, 'agent', 'status_change');
@@ -532,6 +555,7 @@ export function spawnPlanner(card: Card, projectDir: string, dbPath: string, opt
 
   child.on('close', (code) => {
     const db = initDatabase(dbPath);
+    let dbClosed = false;
     try {
       const { sessionId, resultText, usage } = parseStreamJsonOutput(stdout);
       if (usage) addNote(db, card.id, JSON.stringify(usage), 'agent', 'output');
@@ -586,6 +610,64 @@ export function spawnPlanner(card: Card, projectDir: string, dbPath: string, opt
           db.prepare(
             "INSERT INTO activity_log (card_id, action, actor) VALUES (?, 'card.plan_ready', 'agent')"
           ).run(card.id);
+
+          // Auto-pilot: if enabled, auto-approve plan and trigger implementation
+          const freshCard = getCard(db, card.id);
+          if (freshCard?.auto_pilot) {
+            try {
+              const col = db.prepare('SELECT board_id FROM columns WHERE id = ?').get(freshCard.column_id) as { board_id: number } | undefined;
+              const autoBoardId = col?.board_id as number;
+              const boardRow = db.prepare('SELECT * FROM boards WHERE id = ?').get(autoBoardId) as any;
+
+              if (boardRow?.directory) {
+                updatePlanStatus(db, freshCard.id, 'approved');
+                const buildingCol = db.prepare("SELECT id FROM columns WHERE board_id = ? AND name = 'Building'").get(boardRow.id) as { id: number } | undefined;
+                if (buildingCol) {
+                  db.prepare("UPDATE cards SET column_id = ?, agent_status = 'waiting', updated_at = datetime('now') WHERE id = ?")
+                    .run(buildingCol.id, freshCard.id);
+                }
+                addNote(db, freshCard.id, 'Auto-pilot: plan approved, starting implementation', 'agent', 'status_change');
+                db.prepare("INSERT INTO activity_log (card_id, action, actor, details_json) VALUES (?, 'card.auto_approved', 'agent', ?)")
+                  .run(freshCard.id, JSON.stringify({ stage: 'plan' }));
+
+                const autoPilotModel = getEffectiveModel(db, freshCard.id);
+
+                // Close db before spawning to avoid lock contention
+                db.close();
+                dbClosed = true;
+
+                // Acquire pool slot, then spawn implementation
+                agentPool.acquire(autoBoardId, freshCard.id).then(async () => {
+                  const implDb = initDatabase(dbPath);
+                  try {
+                    implDb.prepare("UPDATE cards SET agent_status = 'working', updated_at = datetime('now') WHERE id = ?").run(freshCard.id);
+                  } finally {
+                    implDb.close();
+                  }
+                  const latestCard = (() => { const d = initDatabase(dbPath); try { return getCard(d, freshCard.id); } finally { d.close(); } })();
+                  if (!latestCard || latestCard.archived) {
+                    agentPool.release(autoBoardId, freshCard.id);
+                    return;
+                  }
+                  try {
+                    await spawnImplementation(latestCard, boardRow.directory, dbPath, { boardId: autoBoardId, model: autoPilotModel });
+                  } catch {
+                    agentPool.release(autoBoardId, freshCard.id);
+                    const errDb = initDatabase(dbPath);
+                    try {
+                      errDb.prepare("UPDATE cards SET agent_status = 'errored', updated_at = datetime('now') WHERE id = ?").run(freshCard.id);
+                      addNote(errDb, freshCard.id, 'Auto-pilot: failed to spawn implementation', 'agent', 'status_change');
+                    } finally { errDb.close(); }
+                  }
+                }).catch(() => {
+                  const errDb = initDatabase(dbPath);
+                  try {
+                    errDb.prepare("UPDATE cards SET agent_status = 'idle', updated_at = datetime('now') WHERE id = ?").run(freshCard.id);
+                  } finally { errDb.close(); }
+                });
+              }
+            } catch { /* auto-pilot advance is non-critical */ }
+          }
         } else {
           // Plan parsing failed
           updatePlanStatus(db, card.id, 'failed');
@@ -609,7 +691,7 @@ export function spawnPlanner(card: Card, projectDir: string, dbPath: string, opt
         ).run(card.id, JSON.stringify({ error: errorMsg }));
       }
     } finally {
-      db.close();
+      if (!dbClosed) db.close();
     }
   });
 

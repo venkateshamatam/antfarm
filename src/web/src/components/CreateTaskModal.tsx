@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { toast } from 'sonner'
-import { Link2, Cpu, Info, FileText, GitBranch } from 'lucide-react'
+import { Link2, Cpu, Info, FileText, GitBranch, Zap } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -37,6 +37,7 @@ export function CreateTaskModal({ boardId, columns }: CreateTaskModalProps) {
   const [model, setModel] = useState('')
   const [chainAction, setChainAction] = useState<'none' | 'new' | string>('none')
   const [newChainName, setNewChainName] = useState('')
+  const [autoPilot, setAutoPilot] = useState(false)
 
   const ideaColumn = columns.find(c => c.name === 'Idea')
   const existingChains = boardData?.chains ?? []
@@ -52,6 +53,7 @@ export function CreateTaskModal({ boardId, columns }: CreateTaskModalProps) {
       setModel('')
       setChainAction('none')
       setNewChainName('')
+      setAutoPilot(false)
     }
   }, [showCreateTask])
 
@@ -83,6 +85,7 @@ export function CreateTaskModal({ boardId, columns }: CreateTaskModalProps) {
         title: title.trim(),
         description: description.trim(),
         model: model || undefined,
+        auto_pilot: autoPilot || undefined,
       })
 
       if (chainAction === 'new' && newChainName.trim()) {
@@ -195,6 +198,19 @@ export function CreateTaskModal({ boardId, columns }: CreateTaskModalProps) {
               </Select>
             </div>
           </div>
+
+          {/* Auto-pilot toggle */}
+          <label className="flex items-center gap-2.5 cursor-pointer select-none group">
+            <input
+              type="checkbox"
+              checked={autoPilot}
+              onChange={e => setAutoPilot(e.target.checked)}
+              className="rounded border-border"
+            />
+            <Zap className={`h-3.5 w-3.5 ${autoPilot ? 'text-amber-500' : 'text-muted-foreground'}`} />
+            <span className="text-sm font-medium">Auto-pilot</span>
+            <span className="text-xs text-muted-foreground">(skip approvals — idea to done unattended)</span>
+          </label>
 
           {/* New chain name input */}
           {chainAction === 'new' && (

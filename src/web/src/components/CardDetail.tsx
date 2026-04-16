@@ -4,7 +4,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import {
   Check, Trash2, RotateCcw, TerminalSquare, ExternalLink, X,
-  GitBranch, Plus, AlertTriangle, Loader2, Undo2, Cpu, Link2, Send, GitPullRequest,
+  GitBranch, Plus, AlertTriangle, Loader2, Undo2, Cpu, Link2, Send, GitPullRequest, Zap,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -192,6 +192,18 @@ function CardDetailContent({
             )}
           </div>
         )}
+
+        {/* Auto-pilot toggle */}
+        <label className="flex items-center gap-1.5 cursor-pointer select-none">
+          <Zap className={`h-3 w-3 ${card.auto_pilot ? 'text-amber-500' : 'text-muted-foreground/60'}`} />
+          <input
+            type="checkbox"
+            checked={card.auto_pilot}
+            onChange={e => updateCard.mutate({ id: card.id, auto_pilot: e.target.checked }, { onError: (err) => toast.error(err.message) })}
+            className="rounded border-border h-3 w-3"
+          />
+          <span className={`font-medium ${card.auto_pilot ? 'text-amber-500' : 'text-foreground'}`}>Auto-pilot</span>
+        </label>
 
         {/* Git branch */}
         {card.git && (

@@ -83,6 +83,7 @@ export interface Card {
   chain_id: number | null
   chain_position: number | null
   model: string | null
+  auto_pilot: boolean
   // Joined fields from getAllBoardCards
   column_name?: string
   column_position?: number

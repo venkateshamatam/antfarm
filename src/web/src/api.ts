@@ -51,7 +51,7 @@ export const api = {
 
   // Cards
   getCard: (id: number) => request<CardDetail>(`/api/cards/${id}`),
-  createCard: (data: { column_id: number; title: string; description?: string; context?: string; model?: string }) =>
+  createCard: (data: { column_id: number; title: string; description?: string; context?: string; model?: string; auto_pilot?: boolean }) =>
     request<Card>('/api/cards', { method: 'POST', body: JSON.stringify(data) }),
   updateCard: (id: number, data: Partial<Card>) =>
     request<Card>(`/api/cards/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
