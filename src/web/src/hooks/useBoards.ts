@@ -158,6 +158,14 @@ export function useSeedTasks(boardId: number | null) {
   })
 }
 
+export function useSuggestTasks(boardId: number | null) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => api.suggestTasks(boardId!),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['board', boardId] }),
+  })
+}
+
 export function useAddSubtask() {
   const qc = useQueryClient()
   return useMutation({

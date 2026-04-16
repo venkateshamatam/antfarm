@@ -3,6 +3,7 @@ import { toast } from 'sonner'
 import {
   Keyboard, Moon, Sun, Plus, Settings, Zap,
   ChevronLeft, X, TerminalSquare, FolderOpen, LayoutGrid,
+  Lightbulb, Loader2,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -15,6 +16,7 @@ import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts'
 import {
   useBoardList, useBoard, usePoolStatus, useCreateBoard,
   useGenerateSpec, useApproveCard, useDeleteCard, useRetryCard,
+  useSuggestTasks,
 } from './hooks/useBoards'
 import type { Card } from './types'
 import { Board } from './components/Board'
@@ -80,6 +82,7 @@ export default function App() {
   const approveCard = useApproveCard(store.activeBoardId)
   const deleteCard = useDeleteCard(store.activeBoardId)
   const retryCard = useRetryCard(store.activeBoardId)
+  const suggestTasks = useSuggestTasks(store.activeBoardId)
 
   // Auto-select first board only on initial load
   const hasAutoSelected = useRef(false)
@@ -185,6 +188,32 @@ export default function App() {
             </TooltipTrigger>
             <TooltipContent>New task</TooltipContent>
           </Tooltip>
+          {boardData.board.directory && (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7"
+                    disabled={suggestTasks.isPending}
+                    onClick={() => {
+                      suggestTasks.mutate(undefined, {
+                        onSuccess: (data) => toast.success(`${data.created} tasks suggested`),
+                        onError: (e) => toast.error(e.message),
+                      })
+                    }}
+                  />
+                }
+              >
+                {suggestTasks.isPending
+                  ? <Loader2 className="h-4 w-4 animate-spin" />
+                  : <Lightbulb className="h-4 w-4" />
+                }
+              </TooltipTrigger>
+              <TooltipContent>Suggest tasks</TooltipContent>
+            </Tooltip>
+          )}
           <Tooltip>
             <TooltipTrigger
               render={<Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => store.setShowDirectoryModal(true)} />}

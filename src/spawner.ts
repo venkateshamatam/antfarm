@@ -14,7 +14,7 @@ import type { Card } from './types.js';
 import { agentPool } from './pool.js';
 
 // builds cli args for spawning claude. handles --model and --resume flags.
-function buildClaudeArgs(prompt: string, opts?: { model?: ModelName; resumeSessionId?: string }): string[] {
+export function buildClaudeArgs(prompt: string, opts?: { model?: ModelName; resumeSessionId?: string }): string[] {
   const args: string[] = [];
   if (opts?.resumeSessionId) args.push('--resume', opts.resumeSessionId);
   if (opts?.model) args.push('--model', opts.model);
@@ -31,7 +31,7 @@ export interface SessionUsage {
   num_turns: number;
 }
 
-function parseStreamJsonOutput(stdout: string): { sessionId: string | null; resultText: string; usage: SessionUsage | null } {
+export function parseStreamJsonOutput(stdout: string): { sessionId: string | null; resultText: string; usage: SessionUsage | null } {
   let sessionId: string | null = null;
   let resultText = '';
   let usage: SessionUsage | null = null;

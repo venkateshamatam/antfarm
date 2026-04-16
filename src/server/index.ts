@@ -34,13 +34,13 @@ import {
   reorderChainCards,
 } from '../db/queries.js';
 import { getBlockers, getDependents } from '../db/deps.js';
-import { spawnSpecGeneration, spawnImplementation, spawnPlanner } from '../spawner.js';
+import { spawnSpecGeneration, spawnImplementation, spawnPlanner, buildClaudeArgs, parseStreamJsonOutput } from '../spawner.js';
 import { PIPELINE_COLUMNS } from '../types.js';
 import { agentPool } from '../pool.js';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
-import { exec, execSync } from 'child_process';
+import { exec, execSync, spawn } from 'child_process';
 import { setupPtyWebSocket, cleanupAllPtySessions } from './pty.js';
 import { killProcess } from './process-registry.js';
 
@@ -535,6 +535,128 @@ export function startDashboardServer(dbPath: string, port: number): Promise<numb
     }
 
     return c.json({ created: created.length, skipped, cards: created });
+  });
+
+  // ── Suggest tasks (AI-powered codebase analysis) ──
+  app.post('/api/boards/:id/suggest-tasks', async (c) => {
+    const boardId = Number(c.req.param('id'));
+    const result = getBoardWithColumns(db, boardId);
+    if (!result) return c.json({ error: 'Board not found' }, 404);
+    if (!result.board.directory) return c.json({ error: 'Board has no directory set' }, 400);
+
+    const { columns } = result;
+    const directory = result.board.directory!;
+    const ideaColumn = columns.find(col => col.name === 'Idea');
+    if (!ideaColumn) return c.json({ error: 'Board has no Idea column' }, 400);
+
+    // Get all non-archived card titles for deduplication
+    const existingCards = db.prepare(
+      `SELECT c.title FROM cards c
+       JOIN columns col ON col.id = c.column_id
+       WHERE col.board_id = ? AND c.archived = 0`
+    ).all(boardId) as { title: string }[];
+    const existingTitlesSet = new Set(existingCards.map(c => c.title.toLowerCase()));
+
+    // Get recent git log for context
+    let gitLog = '';
+    try {
+      gitLog = execSync('git log --oneline -50', { cwd: directory, timeout: 5000, stdio: 'pipe' }).toString().trim();
+    } catch { /* not a git repo or dir doesn't exist */ }
+
+    const existingTitlesList = existingCards.map(c => c.title).join('\n- ');
+
+    const prompt = [
+      `You are an expert software engineer analyzing a codebase to suggest high-impact improvements.`,
+      ``,
+      `First: read all CLAUDE.md files in this project to understand the codebase, patterns, and conventions.`,
+      `Then: analyze the codebase structure, patterns, and recent development activity.`,
+      ``,
+      `## Recent git history:`,
+      gitLog || '(no git history available)',
+      ``,
+      `## Existing tasks on the board (avoid duplicates):`,
+      existingTitlesList ? `- ${existingTitlesList}` : '(no existing tasks)',
+      ``,
+      `## Instructions:`,
+      `Generate exactly 5 high-impact task suggestions. Focus on:`,
+      `- Agent coordination improvements`,
+      `- Pipeline automation enhancements`,
+      `- Feedback loops and iteration speed`,
+      `- Developer productivity for Claude Code users`,
+      `- Code quality, testing, and reliability improvements`,
+      ``,
+      `Each task should be specific, actionable, and grounded in the actual codebase.`,
+      `Do NOT suggest tasks that duplicate or overlap with existing tasks listed above.`,
+      ``,
+      `Output ONLY a valid JSON array of exactly 5 objects, each with "title" and "description" fields.`,
+      `The title should be concise (under 80 chars). The description should be 2-3 sentences explaining what to build and why.`,
+      `No markdown fences, no explanation — just the JSON array.`,
+    ].join('\n');
+
+    try {
+      const agentOutput = await new Promise<string>((resolve, reject) => {
+        const child = spawn('claude', buildClaudeArgs(prompt), {
+          cwd: directory,
+          stdio: ['ignore', 'pipe', 'pipe'],
+          env: { ...process.env },
+        });
+
+        let stdout = '';
+        let stderr = '';
+        child.stdout?.on('data', (chunk: Buffer) => { stdout += chunk.toString(); });
+        child.stderr?.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
+
+        child.on('error', (err) => reject(err));
+        child.on('close', (code) => {
+          if (code !== 0) {
+            reject(new Error(stderr.trim() || `Claude process exited with code ${code}`));
+            return;
+          }
+          const { resultText } = parseStreamJsonOutput(stdout);
+          resolve(resultText);
+        });
+      });
+
+      // Parse the JSON array of tasks
+      let tasks: { title: string; description: string }[] = [];
+      try {
+        tasks = JSON.parse(agentOutput.trim());
+      } catch {
+        // Regex fallback: extract JSON array from output
+        const match = agentOutput.match(/\[[\s\S]*\]/);
+        if (match) {
+          try { tasks = JSON.parse(match[0]); } catch {}
+        }
+      }
+
+      if (!Array.isArray(tasks) || tasks.length === 0) {
+        return c.json({ error: 'Could not parse suggestions from agent output' }, 500);
+      }
+
+      // Create cards, skipping duplicates
+      const created: any[] = [];
+      for (const task of tasks) {
+        if (!task.title || !task.description) continue;
+        if (existingTitlesSet.has(task.title.toLowerCase())) continue;
+
+        const card = createCard(db, {
+          column_id: ideaColumn.id,
+          title: task.title,
+          description: task.description,
+        });
+        created.push(card);
+        // Track the new title so subsequent tasks in the same batch don't duplicate
+        existingTitlesSet.add(task.title.toLowerCase());
+      }
+
+      if (created.length > 0) {
+        broadcastSSE({ type: 'board.updated', data: { board_id: boardId } });
+      }
+
+      return c.json({ created: created.length, cards: created });
+    } catch (err: any) {
+      return c.json({ error: `Failed to generate suggestions: ${err.message}` }, 500);
+    }
   });
 
   // ── Pipeline actions ──
