@@ -4,8 +4,6 @@ a kanban board where AI agents build your software. you describe what you want, 
 
 built this because managing claude code agents in terminal windows doesn't scale. needed a visual pipeline where i could see what every agent is doing, approve specs before code gets written, and ship PRs without touching a terminal.
 
-i'm using antfarm to build antfarm. the agents write the code for the tool that manages them.
-
 ## how it works
 
 ```
