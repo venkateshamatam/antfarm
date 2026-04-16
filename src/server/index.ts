@@ -1139,9 +1139,9 @@ export function startDashboardServer(dbPath: string, port: number): Promise<numb
         const prompt = [
           'generate a pull request title and description for these code changes.',
           'output exactly two sections separated by ---',
-          'first line: a short PR title (max 72 chars, no prefix, describe what changed)',
+          'first line: a short PR title (max 100 chars, no prefix, describe what changed)',
           'then ---',
-          'then the PR description in markdown with: ## summary (2-3 sentences), ## changes (bullet list of what was added/modified/removed)',
+          'then a concise PR description under 400 characters total. include a 1-2 sentence summary and a short bullet list of key changes.',
           '',
           'diff stat:',
           diffStat,
@@ -1166,13 +1166,16 @@ export function startDashboardServer(dbPath: string, port: number): Promise<numb
           prTitle = text.split('\n')[0].trim();
           prBody = text;
         }
+        // enforce length limits
+        if (prTitle.length > 100) prTitle = prTitle.slice(0, 97) + '...';
+        if (prBody.length > 400) prBody = prBody.slice(0, 397) + '...';
       } catch {
         // fallback: use card title and spec
-        prTitle = card.title;
-        prBody = card.spec ? card.spec.slice(0, 500) : '';
+        prTitle = card.title.slice(0, 100);
+        prBody = card.spec ? card.spec.slice(0, 397) + (card.spec.length > 400 ? '...' : '') : '';
       }
 
-      if (!prTitle || prTitle === 'agent: implement changes') prTitle = card.title;
+      if (!prTitle || prTitle === 'agent: implement changes') prTitle = card.title.slice(0, 100);
 
       // append file stats to description
       if (diffStat) {
