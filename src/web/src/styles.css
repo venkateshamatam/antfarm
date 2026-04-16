@@ -178,6 +178,22 @@
   animation: pulse-dot 1.5s ease-in-out infinite;
 }
 
+/* Typing indicator bounce animation */
+@keyframes typing-bounce {
+  0%, 60%, 100% { transform: translateY(0); }
+  30% { transform: translateY(-4px); }
+}
+.typing-dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 9999px;
+  background-color: currentColor;
+  animation: typing-bounce 1.2s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .typing-dot { animation: none; }
+}
+
 /* Kbd styling */
 kbd {
   @apply inline-flex items-center justify-center rounded-sm border border-border bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground;

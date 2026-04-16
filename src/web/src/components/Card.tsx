@@ -1,6 +1,6 @@
 import {
   Play, Check, RotateCcw, ExternalLink, TerminalSquare,
-  GitBranch, Link2, AlertCircle, Loader2, Zap,
+  GitBranch, Link2, AlertCircle, Zap,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -159,8 +159,10 @@ function StatusIndicator({ status, color }: { status: Card['agent_status']; colo
   switch (status) {
     case 'working':
       return (
-        <span className="flex items-center gap-1 text-[10px] text-blue-500">
-          <Loader2 className="h-3 w-3 animate-spin" /> Working
+        <span className="flex items-center gap-1 text-blue-500" aria-label="Agent working">
+          <span className="typing-dot" />
+          <span className="typing-dot" style={{ animationDelay: '0.2s' }} />
+          <span className="typing-dot" style={{ animationDelay: '0.4s' }} />
         </span>
       )
     case 'waiting':
