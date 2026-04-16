@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.env
+*.db
+*.db-wal
+*.db-shm
+*.log
+.gstack/
+.worktrees/
+.DS_Store
+*.tsbuildinfo
+package-lock.json
