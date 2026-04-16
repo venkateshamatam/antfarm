@@ -184,6 +184,29 @@ shadcn/ui Nova preset with oklch color tokens. All colors go through shadcn's se
 - `Cmd+K`: command palette
 - `?`: shortcut help overlay
 
+### Remote Access (Tailscale + PWA)
+
+Access Antfarm from your phone or any device:
+
+1. Install Tailscale on your Mac: `brew install tailscale` (or download from tailscale.com)
+2. Install Tailscale on your phone (iOS App Store / Google Play)
+3. Sign in on both devices with the same account
+4. Set an API key and start the server:
+   ```bash
+   ANTFARM_API_KEY=your-secret-here bun run start
+   ```
+5. Find your Mac's Tailscale hostname: `tailscale status` (looks like `your-mac.tail1234.ts.net`)
+6. On your phone, open: `http://your-mac.tail1234.ts.net:4800/mobile`
+7. Enter the API key when prompted
+8. Tap "Share" > "Add to Home Screen" for the app-like experience
+
+Notes:
+- Desktop view: `http://...:4800/` (full kanban, terminal, drag-drop)
+- Mobile view: `http://...:4800/mobile` (tap-optimized, stage tabs, quick actions)
+- When `ANTFARM_API_KEY` is not set, no auth is required (localhost-only mode)
+- The API key is sent as a Bearer token on every request
+- SSE and WebSocket pass the token as a `?token=` query parameter
+
 ## Skill routing
 
 When the user's request matches an available skill, ALWAYS invoke it using the Skill

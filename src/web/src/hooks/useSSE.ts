@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { queryClient } from '../main'
+import { getAuthToken } from '../api'
 
 export function useSSE(url: string) {
   const [connected, setConnected] = useState(false)
@@ -17,7 +18,10 @@ export function useSSE(url: string) {
     }
 
     function connect() {
-      es = new EventSource(url)
+      // pass auth token as query param (EventSource can't set headers)
+      const token = getAuthToken()
+      const sseUrl = token ? `${url}${url.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}` : url
+      es = new EventSource(sseUrl)
 
       es.onopen = () => {
         setConnected(true)

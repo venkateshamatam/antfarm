@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useAppStore } from './store'
+import { getAuthToken, setAuthToken } from './api'
 import { useSSE } from './hooks/useSSE'
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts'
 import {
@@ -22,6 +23,51 @@ import { CreateTaskModal } from './components/CreateTaskModal'
 import { DirectoryModal } from './components/DirectoryModal'
 import { ShortcutOverlay } from './components/ShortcutOverlay'
 import { Terminal } from './components/Terminal'
+
+export function AuthGate({ children }: { children: React.ReactNode }) {
+  const [token, setToken] = useState('')
+  const [checking, setChecking] = useState(true)
+  const [needsAuth, setNeedsAuth] = useState(false)
+
+  useEffect(() => {
+    // check if the api requires auth by making a test request
+    fetch('/api/boards', {
+      headers: getAuthToken() ? { 'Authorization': `Bearer ${getAuthToken()}` } : {},
+    }).then(res => {
+      if (res.status === 401) setNeedsAuth(true)
+      setChecking(false)
+    }).catch(() => setChecking(false))
+  }, [])
+
+  if (checking) return null
+  if (!needsAuth) return <>{children}</>
+
+  return (
+    <div style={{
+      display: 'flex', flexDirection: 'column', alignItems: 'center',
+      justifyContent: 'center', height: '100vh', gap: '16px',
+    }}>
+      <h1 style={{ fontSize: '20px', fontWeight: 700 }}>antfarm</h1>
+      <p style={{ fontSize: '13px', color: 'var(--muted-foreground)' }}>enter api key to continue</p>
+      <Input
+        type="password"
+        value={token}
+        onChange={(e) => setToken(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && token.trim()) {
+            setAuthToken(token.trim())
+            window.location.reload()
+          }
+        }}
+        placeholder="API key"
+        className="max-w-xs"
+      />
+      <Button onClick={() => { if (token.trim()) { setAuthToken(token.trim()); window.location.reload(); } }}>
+        Connect
+      </Button>
+    </div>
+  )
+}
 
 export default function App() {
   const { connected } = useSSE('/events')

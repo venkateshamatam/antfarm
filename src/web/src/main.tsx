@@ -3,7 +3,8 @@ import { createRoot } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Toaster } from '@/components/ui/sonner';
 import { TooltipProvider } from '@/components/ui/tooltip';
-import App from './App';
+import App, { AuthGate } from './App';
+import { MobileApp } from './MobileApp';
 import './styles.css';
 
 const queryClient = new QueryClient({
@@ -28,7 +29,9 @@ createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
-        <App />
+        <AuthGate>
+          {window.location.pathname === '/mobile' ? <MobileApp /> : <App />}
+        </AuthGate>
         <Toaster position="bottom-right" />
       </TooltipProvider>
     </QueryClientProvider>

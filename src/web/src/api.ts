@@ -1,8 +1,22 @@
 import type { Board, BoardDetail, Card, CardDetail, Chain, ImplementationPlan, ModelInfo, Note, PoolStatus, Subtask } from './types'
 
+// auth token for remote access (set via login prompt, stored in localStorage)
+export function getAuthToken(): string | null {
+  try { return localStorage.getItem('antfarm-token'); } catch { return null; }
+}
+export function setAuthToken(token: string) {
+  try { localStorage.setItem('antfarm-token', token); } catch {}
+}
+export function clearAuthToken() {
+  try { localStorage.removeItem('antfarm-token'); } catch {}
+}
+
 async function request<T>(path: string, opts?: RequestInit): Promise<T> {
+  const token = getAuthToken();
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (token) headers['Authorization'] = `Bearer ${token}`;
   const res = await fetch(path, {
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     ...opts,
   })
   if (!res.ok) {
@@ -19,6 +33,9 @@ async function request<T>(path: string, opts?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  // generic request (for endpoints not yet wrapped)
+  request,
+
   // Boards
   getBoards: () => request<Board[]>('/api/boards'),
   getBoard: (id: number) => request<BoardDetail>(`/api/boards/${id}`),

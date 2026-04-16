@@ -97,6 +97,28 @@ export function startDashboardServer(dbPath: string, port: number): Promise<numb
   const db = initDatabase(dbPath);
   const app = new Hono();
 
+  // auth middleware: when ANTFARM_API_KEY is set, all requests need the token
+  const apiKey = process.env.ANTFARM_API_KEY;
+  if (apiKey) {
+    app.use('*', async (c, next) => {
+      const url = new URL(c.req.url);
+
+      // skip auth for static files (html, css, js, icons, manifest)
+      if (url.pathname === '/' || url.pathname.startsWith('/assets/') || url.pathname === '/manifest.json' ||
+          url.pathname === '/sw.js' || url.pathname.endsWith('.png') || url.pathname === '/mobile') {
+        return next();
+      }
+
+      const token = c.req.header('Authorization')?.replace('Bearer ', '') ||
+                    url.searchParams.get('token');
+      if (token !== apiKey) {
+        return c.json({ error: 'Unauthorized' }, 401);
+      }
+      await next();
+    });
+    console.log('[antfarm] API key auth enabled');
+  }
+
   // ── Fix existing specs that contain raw JSON output ──
   try {
     const badSpecs = db.prepare("SELECT id, spec FROM cards WHERE spec IS NOT NULL AND spec LIKE '[{%'").all() as { id: number; spec: string }[];
@@ -996,6 +1018,160 @@ export function startDashboardServer(dbPath: string, port: number): Promise<numb
     return c.json({ directory: result });
   });
 
+  // ── list remote branches for PR base selection ──
+  app.get('/api/cards/:id/branches', (c) => {
+    const cardId = Number(c.req.param('id'));
+    const card = getCard(db, cardId);
+    if (!card) return c.json({ error: 'Card not found' }, 404);
+
+    const col = db.prepare('SELECT board_id FROM columns WHERE id = ?').get(card.column_id) as any;
+    const board = db.prepare('SELECT * FROM boards WHERE id = ?').get(col?.board_id) as any;
+    const cwd = card.worktree_path || card.directory_path || board?.directory;
+    if (!cwd) return c.json({ branches: [], default: 'main' });
+
+    try {
+      const raw = execSync('git branch -r --format="%(refname:short)"', { cwd, timeout: 5000, stdio: 'pipe' }).toString().trim();
+      const branches = raw.split('\n').filter(Boolean).map(b => b.replace('origin/', '')).filter(b => b !== 'HEAD');
+      const defaultBranch = branches.includes('main') ? 'main' : branches.includes('master') ? 'master' : branches[0] || 'main';
+      return c.json({ branches, default: defaultBranch });
+    } catch {
+      return c.json({ branches: ['main'], default: 'main' });
+    }
+  });
+
+  // ── PR creation: push branch and create github PR ──
+  app.post('/api/cards/:id/create-pr', async (c) => {
+    const cardId = Number(c.req.param('id'));
+    const card = getCard(db, cardId);
+    if (!card) return c.json({ error: 'Card not found' }, 404);
+    if (!card.worktree_path && !card.git_branch) {
+      return c.json({ error: 'No worktree or branch for this card' }, 400);
+    }
+
+    const cwd = card.worktree_path || card.directory_path;
+    if (!cwd || !fs.existsSync(cwd)) {
+      return c.json({ error: 'Worktree directory not found' }, 400);
+    }
+
+    let body: any = {};
+    try { body = await c.req.json(); } catch { /* no body is fine */ }
+    const baseBranch = body.base || '';
+
+    try {
+      // commit any uncommitted changes
+      try {
+        execSync('git add -A && git commit -m "agent: implement changes"', { cwd, timeout: 10000, stdio: 'pipe' });
+      } catch { /* nothing to commit is fine */ }
+
+      // push the branch
+      const branch = card.git_branch || execSync('git branch --show-current', { cwd, timeout: 5000 }).toString().trim();
+      execSync(`git push -u origin ${branch}`, { cwd, timeout: 30000, stdio: 'pipe' });
+
+      // generate pr title and description from the actual diff
+      const baseFlag = baseBranch ? ` --base ${baseBranch}` : '';
+      const baseRef = baseBranch || 'main';
+      let diffStat = '';
+      try {
+        diffStat = execSync(`git diff ${baseRef}...${branch} --stat`, { cwd, timeout: 5000, stdio: 'pipe' }).toString().trim();
+      } catch {
+        try { diffStat = execSync(`git diff HEAD~5 --stat`, { cwd, timeout: 5000, stdio: 'pipe' }).toString().trim(); } catch {}
+      }
+
+      // use claude to generate a proper pr title and description from the diff
+      let prTitle = '';
+      let prBody = '';
+      try {
+        const diffContent = execSync(`git log ${baseRef}..${branch} --oneline`, { cwd, timeout: 5000, stdio: 'pipe' }).toString().trim();
+        // summarize from commit messages + stat
+        const commits = diffContent.split('\n').filter(Boolean);
+        if (commits.length > 0) {
+          // extract a clean title from the commits
+          prTitle = commits.length === 1
+            ? commits[0].replace(/^[a-f0-9]+\s+/, '')
+            : `${commits[0].replace(/^[a-f0-9]+\s+/, '')} (+${commits.length - 1} more)`;
+        }
+        prBody = [
+          '## Changes',
+          '',
+          ...commits.map(c => `- ${c.replace(/^[a-f0-9]+\s+/, '')}`),
+          '',
+          '## Files changed',
+          '```',
+          diffStat,
+          '```',
+        ].join('\n');
+      } catch {
+        prTitle = card.title;
+        prBody = card.spec ? card.spec.slice(0, 500) : 'Implemented by Antfarm agent';
+      }
+
+      if (!prTitle) prTitle = card.title;
+
+      // create the PR - write title and body to temp files to avoid shell escaping issues
+      const tmpDir = require('os').tmpdir();
+      const titleFile = path.join(tmpDir, `antfarm-pr-title-${cardId}.txt`);
+      const bodyFile = path.join(tmpDir, `antfarm-pr-body-${cardId}.txt`);
+      fs.writeFileSync(titleFile, prTitle);
+      fs.writeFileSync(bodyFile, prBody);
+
+      const prOutput = execSync(
+        `gh pr create --title "$(cat ${titleFile})" --body-file ${bodyFile} --head ${branch}${baseFlag}`,
+        { cwd, timeout: 20000, stdio: 'pipe' }
+      ).toString().trim();
+
+      // cleanup temp files
+      try { fs.unlinkSync(titleFile); fs.unlinkSync(bodyFile); } catch {}
+
+      // extract PR url from gh output
+      const prUrl = prOutput.match(/https:\/\/github\.com\/[^\s]+/)?.[0] || prOutput;
+      db.prepare("UPDATE cards SET pr_url = ?, pr_branch = ?, updated_at = datetime('now') WHERE id = ?")
+        .run(prUrl, branch, cardId);
+      addNote(db, cardId, `PR created: ${prUrl}`, 'agent', 'status_change');
+      broadcastSSE({ type: 'card.pr_ready', data: { card_id: cardId, pr_url: prUrl, branch } });
+      return c.json({ success: true, pr_url: prUrl, branch, title: prTitle });
+    } catch (err: any) {
+      const msg = err.stderr?.toString()?.trim() || err.message || 'Failed to create PR';
+      return c.json({ error: msg }, 500);
+    }
+  });
+
+  // ── work on PR: send a prompt to claude in the card's worktree ──
+  app.post('/api/cards/:id/work-on-pr', async (c) => {
+    const cardId = Number(c.req.param('id'));
+    const card = getCard(db, cardId);
+    if (!card) return c.json({ error: 'Card not found' }, 404);
+
+    const body = await c.req.json();
+    const prompt = body.prompt as string;
+    if (!prompt?.trim()) return c.json({ error: 'prompt required' }, 400);
+
+    const cwd = card.worktree_path || card.directory_path;
+    const col = db.prepare('SELECT board_id FROM columns WHERE id = ?').get(card.column_id) as any;
+    const boardId = col?.board_id as number;
+    const board = db.prepare('SELECT * FROM boards WHERE id = ?').get(boardId) as any;
+    const dir = cwd && fs.existsSync(cwd) ? cwd : board?.directory;
+
+    if (!dir) return c.json({ error: 'No working directory for this card' }, 400);
+
+    // set card to working state
+    db.prepare("UPDATE cards SET agent_status = 'working', updated_at = datetime('now') WHERE id = ?").run(cardId);
+    broadcastSSE({ type: 'card.updated', data: { card_id: cardId, agent_status: 'working' } });
+
+    const { spawnSpecGeneration } = await import('../spawner.js');
+    const effectiveModel = (card.model || board?.default_model || 'opus') as string;
+
+    // use --resume if the card has a session, otherwise fresh
+    spawnSpecGeneration(card, dir, dbPath, {
+      respecComment: prompt,
+      boardId,
+      model: effectiveModel,
+      resumeSessionId: card.claude_session_id || undefined,
+    });
+
+    addNote(db, cardId, `Working on PR: ${prompt}`, 'user', 'note');
+    return c.json({ success: true });
+  });
+
   // ── Static files (React dashboard) ──
   // In dev (tsx): __dirname = src/server → ../web/dist = src/web/dist
   // In prod (tsc): __dirname = dist/server → fall back to src/web/dist
@@ -1089,8 +1265,8 @@ export function startDashboardServer(dbPath: string, port: number): Promise<numb
   return new Promise((resolve, reject) => {
     const tryPort = (p: number, attempts: number) => {
       if (attempts > 5) { reject(new Error('Could not find available port')); return; }
-      const httpServer = serve({ fetch: app.fetch, port: p, hostname: '127.0.0.1' }, () => {
-        console.log(`[antfarm] Dashboard running at http://127.0.0.1:${p}`);
+      const httpServer = serve({ fetch: app.fetch, port: p, hostname: '0.0.0.0' }, () => {
+        console.log(`[antfarm] Dashboard running at http://0.0.0.0:${p}`);
         const row = db.prepare('SELECT MAX(id) as max_id FROM activity_log').get() as any;
         lastActivityId = row?.max_id ?? 0;
 
