@@ -1,0 +1,46 @@
+{
+  "name": "antfarm",
+  "version": "0.1.0",
+  "description": "Agent coordination layer for Claude Code — kanban board where agents coordinate through shared state",
+  "type": "module",
+  "main": "dist/cli.js",
+  "bin": {
+    "antfarm": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc && cd src/web && bun vite build",
+    "dev": "concurrently -n api,web -c blue,green \"bun src/cli.ts serve\" \"cd src/web && bun vite --port 5173\"",
+    "start": "node dist/cli.js",
+    "test": "bun vitest",
+    "test:run": "bun vitest run"
+  },
+  "keywords": [
+    "claude-code",
+    "mcp",
+    "kanban",
+    "agent",
+    "coordination"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.19.14",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "better-sqlite3": "^12.9.0",
+    "hono": "^4.12.12",
+    "simple-git": "^3.36.0",
+    "uuid": "^13.0.0",
+    "ws": "^8.20.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/uuid": "^10.0.0",
+    "@types/ws": "^8.18.1",
+    "concurrently": "^9.2.1",
+    "typescript": "^6.0.2",
+    "vitest": "^4.1.4"
+  }
+}
