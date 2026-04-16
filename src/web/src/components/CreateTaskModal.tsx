@@ -114,7 +114,7 @@ export function CreateTaskModal({ boardId, columns }: CreateTaskModalProps) {
 
   return (
     <Dialog open={showCreateTask} onOpenChange={setShowCreateTask}>
-      <DialogContent className="max-w-xl">
+      <DialogContent className="max-w-3xl">
         <DialogHeader>
           <DialogTitle>Create Task</DialogTitle>
           <DialogDescription>
@@ -122,32 +122,33 @@ export function CreateTaskModal({ boardId, columns }: CreateTaskModalProps) {
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4">
+        <div className="space-y-4 max-h-[calc(90vh-10rem)] overflow-y-auto">
           {/* Title */}
           <div className="space-y-1.5">
-            <Label className="text-xs font-medium">Title <span className="text-destructive">*</span></Label>
+            <Label className="text-sm font-medium">Title <span className="text-destructive">*</span></Label>
             <Input
               value={title}
               onChange={e => setTitle(e.target.value)}
               placeholder="e.g. Add OAuth2 login flow"
               autoFocus
-              className="text-sm"
+              className="text-base"
             />
           </div>
 
           {/* Description */}
           <div className="space-y-1.5">
-            <Label className="text-xs font-medium">Description <span className="text-destructive">*</span></Label>
+            <Label className="text-sm font-medium">Description <span className="text-destructive">*</span></Label>
             <Textarea
               value={description}
               onChange={e => setDescription(e.target.value)}
               placeholder={"What should be built and why?\n\nInclude:\n- Requirements and acceptance criteria\n- Edge cases to handle\n- Any constraints or dependencies"}
-              rows={5}
-              className="text-sm resize-none"
+              rows={12}
+              className="text-sm resize-y min-h-[200px]"
             />
-            <p className="text-[11px] text-muted-foreground">
-              This drives spec generation. Be specific about what you want.
-            </p>
+            <div className="flex justify-between text-[11px] text-muted-foreground">
+              <span>This drives spec generation. Be specific about what you want.</span>
+              <span>{description.length} characters</span>
+            </div>
           </div>
 
           <Separator />
@@ -156,7 +157,7 @@ export function CreateTaskModal({ boardId, columns }: CreateTaskModalProps) {
           <div className="grid grid-cols-2 gap-3">
             {/* Model */}
             <div className="space-y-1.5">
-              <Label className="text-xs font-medium flex items-center gap-1">
+              <Label className="text-sm font-medium flex items-center gap-1">
                 <Cpu className="h-3 w-3" /> Model
               </Label>
               <Select value={model} onValueChange={setModel}>
@@ -173,7 +174,7 @@ export function CreateTaskModal({ boardId, columns }: CreateTaskModalProps) {
 
             {/* Chain */}
             <div className="space-y-1.5">
-              <Label className="text-xs font-medium flex items-center gap-1">
+              <Label className="text-sm font-medium flex items-center gap-1">
                 <Link2 className="h-3 w-3" /> Chain
               </Label>
               <Select value={chainAction} onValueChange={setChainAction}>
