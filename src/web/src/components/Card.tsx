@@ -27,6 +27,7 @@ export function CardItem({ card, stage, boardId }: CardItemProps) {
 
   return (
     <div
+      data-card-id={card.id}
       className={`
         group relative rounded-md border bg-card p-2.5 cursor-pointer outline-none
         transition-all duration-150 hover:shadow-sm hover:border-border/80
