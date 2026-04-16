@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge'
 import { useAppStore } from '../store'
 import { stageColor, type Card, type Column, type PipelineStage } from '../types'
 import { CardItem } from './Card'
+import { useConfetti } from '../hooks/useConfetti'
 
 interface BoardProps {
   columns: Column[]
@@ -26,6 +27,8 @@ const STAGE_MAP: Record<string, PipelineStage> = {
 }
 
 export function Board({ columns, cards, boardId }: BoardProps) {
+  useConfetti(cards, columns)
+
   const sortedColumns = useMemo(
     () => [...columns].sort((a, b) => a.position - b.position),
     [columns],
@@ -98,6 +101,7 @@ export function Board({ columns, cards, boardId }: BoardProps) {
           return (
             <div
               key={col.id}
+              data-column-stage={stage}
               className={`w-[240px] overflow-y-auto ${
                 i < sortedColumns.length - 1 ? 'border-r border-border' : ''
               }`}
