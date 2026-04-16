@@ -1,8 +1,8 @@
 # antfarm
 
-a kanban board where AI agents build your software. you describe what you want, agents spec it, plan it, build it, review it, and create the PR. you just approve at the gates.
+a kanban board where AI agents build your software. you describe what you want, agents spec it, plan it, build it, review it, and create the PR. 
 
-built this because managing claude code agents in terminal windows doesn't scale. needed a visual pipeline where i could see what every agent is doing, approve specs before code gets written, and ship PRs without touching a terminal.
+built this because managing claude code agents in terminal windows was too much context switching. needed a visual pipeline where i could see what every agent is doing, approve specs before code gets written, and ship PRs without touching a terminal.
 
 ## how it works
 
