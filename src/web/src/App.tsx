@@ -198,9 +198,10 @@ export default function App() {
                     className="h-7 w-7"
                     disabled={suggestTasks.isPending}
                     onClick={() => {
+                      toast.info('Asking Claude to analyze the codebase...')
                       suggestTasks.mutate(undefined, {
-                        onSuccess: (data) => toast.success(`${data.created} tasks suggested`),
-                        onError: (e) => toast.error(e.message),
+                        onSuccess: (data) => toast.success(`${data.created} tasks created`),
+                        onError: (e) => toast.error(e.message || 'Failed to suggest tasks'),
                       })
                     }}
                   />
