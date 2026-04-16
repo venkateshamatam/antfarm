@@ -1,24 +1,24 @@
 // Database schema and initialization for Antfarm
 // Creates SQLite tables, indexes, and seeds default board with pipeline columns
 
-import Database from 'better-sqlite3';
+import { Database } from 'bun:sqlite';
 import { PIPELINE_COLUMNS } from '../types.js';
 
 export type DatabaseInstance = InstanceType<typeof Database>;
 
-// Creates or opens a SQLite database at the given path, enables WAL mode,
+// creates or opens a sqlite database at the given path, enables wal mode,
 // creates all required tables and indexes, and seeds default board data
 export function initDatabase(dbPath: string): DatabaseInstance {
   const db = new Database(dbPath);
 
-  // Enable WAL mode for better concurrent read/write performance
-  db.pragma('journal_mode = WAL');
+  // enable wal mode for better concurrent read/write performance
+  db.exec('PRAGMA journal_mode = WAL');
 
-  // Set busy timeout to wait up to 3 seconds when the database is locked
-  db.pragma('busy_timeout = 3000');
+  // set busy timeout to wait up to 3 seconds when the database is locked
+  db.exec('PRAGMA busy_timeout = 3000');
 
-  // Enable foreign key enforcement
-  db.pragma('foreign_keys = ON');
+  // enable foreign key enforcement
+  db.exec('PRAGMA foreign_keys = ON');
 
   // Create all tables
   db.exec(`
@@ -159,6 +159,19 @@ export function initDatabase(dbPath: string): DatabaseInstance {
       const basePos = (specReadyCol?.position ?? 2) + 1;
       db.prepare('INSERT INTO columns (board_id, name, position, color) VALUES (?, ?, ?, ?)').run(board.id, 'Planning', basePos, '#a855f7');
       db.prepare('INSERT INTO columns (board_id, name, position, color) VALUES (?, ?, ?, ?)').run(board.id, 'Plan Review', basePos + 1, '#d946ef');
+    }
+  }
+
+  // migration: remove legacy "Approved" column (replaced by Planning/Plan Review)
+  for (const board of existingBoards) {
+    const approvedCol = db.prepare("SELECT id FROM columns WHERE board_id = ? AND name = 'Approved'").get(board.id) as { id: number } | undefined;
+    if (approvedCol) {
+      // move any cards stuck in Approved to Spec Ready
+      const specReadyCol = db.prepare("SELECT id FROM columns WHERE board_id = ? AND name = 'Spec Ready'").get(board.id) as { id: number } | undefined;
+      if (specReadyCol) {
+        db.prepare('UPDATE cards SET column_id = ? WHERE column_id = ?').run(specReadyCol.id, approvedCol.id);
+      }
+      db.prepare('DELETE FROM columns WHERE id = ?').run(approvedCol.id);
     }
   }
 
