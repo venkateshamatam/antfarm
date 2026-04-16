@@ -152,7 +152,3 @@ src/
       components/       — board, cards, detail modal, terminal
       hooks/            — SSE, keyboard shortcuts, tanstack query
 ```
-
-## license
-
-MIT
