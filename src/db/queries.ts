@@ -59,6 +59,7 @@ function normalizeCard(row: Record<string, unknown>): Card {
   return {
     ...row,
     archived: Boolean(row.archived),
+    auto_pilot: Boolean(row.auto_pilot),
   } as Card;
 }
 
@@ -195,6 +196,7 @@ export function createCard(
     directory_path?: string;
     depends_on?: number[];
     model?: string;
+    auto_pilot?: boolean;
   }
 ): Card {
   return withRetry(() => {
@@ -208,8 +210,8 @@ export function createCard(
 
       const insertResult = db
         .prepare(
-          `INSERT INTO cards (column_id, title, description, context, files, directory_path, position, model)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+          `INSERT INTO cards (column_id, title, description, context, files, directory_path, position, model, auto_pilot)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .run(
           data.column_id,
@@ -219,7 +221,8 @@ export function createCard(
           filesJson,
           data.directory_path ?? null,
           maxPos.max_pos + 1,
-          data.model ?? null
+          data.model ?? null,
+          data.auto_pilot ? 1 : 0
         );
 
       const cardId = Number(insertResult.lastInsertRowid);
@@ -253,7 +256,7 @@ export function createCard(
 export function updateCard(
   db: DatabaseInstance,
   cardId: number,
-  data: Partial<Pick<Card, 'title' | 'description' | 'context' | 'files' | 'column_id' | 'position' | 'directory_path' | 'spec' | 'agent_status' | 'spec_status' | 'model'>>
+  data: Partial<Pick<Card, 'title' | 'description' | 'context' | 'files' | 'column_id' | 'position' | 'directory_path' | 'spec' | 'agent_status' | 'spec_status' | 'model' | 'auto_pilot'>>
 ): Card | undefined {
   return withRetry(() => {
     // Build SET clauses dynamically from the provided fields
@@ -309,6 +312,10 @@ export function updateCard(
     if (data.model !== undefined) {
       setClauses.push('model = ?');
       values.push(data.model);
+    }
+    if (data.auto_pilot !== undefined) {
+      setClauses.push('auto_pilot = ?');
+      values.push(data.auto_pilot ? 1 : 0);
     }
 
     if (setClauses.length === 0) {

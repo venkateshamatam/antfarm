@@ -1,6 +1,6 @@
 import {
   Play, Check, RotateCcw, ExternalLink, TerminalSquare,
-  GitBranch, Link2, AlertCircle, Loader2,
+  GitBranch, Link2, AlertCircle, Loader2, Zap,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -53,6 +53,12 @@ export function CardItem({ card, stage, boardId }: CardItemProps) {
         {card.chain_id != null && (
           <Badge variant="secondary" className="text-[10px] h-4 px-1">
             <Link2 className="h-2.5 w-2.5 mr-0.5" />chain
+          </Badge>
+        )}
+
+        {card.auto_pilot && (
+          <Badge variant="secondary" className="text-[10px] h-4 px-1 text-amber-500">
+            <Zap className="h-2.5 w-2.5 mr-0.5" />auto
           </Badge>
         )}
 

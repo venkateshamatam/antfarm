@@ -137,6 +137,9 @@ export function initDatabase(dbPath: string): DatabaseInstance {
   try { db.exec(`ALTER TABLE cards ADD COLUMN chain_position INTEGER`); } catch { /* already exists */ }
   try { db.exec(`CREATE INDEX IF NOT EXISTS idx_cards_chain_id ON cards(chain_id)`); } catch { /* already exists */ }
 
+  // migration: auto-pilot mode (skip approval gates)
+  try { db.exec(`ALTER TABLE cards ADD COLUMN auto_pilot INTEGER DEFAULT 0`); } catch { /* already exists */ }
+
   // migration: per-card model override and board-level default
   try { db.exec(`ALTER TABLE cards ADD COLUMN model TEXT`); } catch { /* already exists */ }
   try { db.exec(`ALTER TABLE boards ADD COLUMN default_model TEXT DEFAULT 'opus'`); } catch { /* already exists */ }
