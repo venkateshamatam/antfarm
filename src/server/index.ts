@@ -424,15 +424,16 @@ export function startDashboardServer(dbPath: string, port: number): Promise<numb
     const dir = card.directory_path || card.worktree_path;
     if (dir) {
       try {
-        const branch = execSync('git rev-parse --abbrev-ref HEAD', { cwd: dir, timeout: 3000 }).toString().trim();
-        const status = execSync('git status --porcelain', { cwd: dir, timeout: 3000 }).toString().trim();
+        const gitOpts = { cwd: dir, timeout: 3000, stdio: 'pipe' as const };
+        const branch = execSync('git rev-parse --abbrev-ref HEAD', gitOpts).toString().trim();
+        const status = execSync('git status --porcelain', gitOpts).toString().trim();
         let ahead = 0, behind = 0;
         try {
-          const ab = execSync('git rev-list --left-right --count HEAD...@{upstream}', { cwd: dir, timeout: 3000 }).toString().trim();
+          const ab = execSync('git rev-list --left-right --count HEAD...@{upstream}', gitOpts).toString().trim();
           const parts = ab.split('\t');
           ahead = parseInt(parts[0]) || 0;
           behind = parseInt(parts[1]) || 0;
-        } catch { /* no upstream */ }
+        } catch { /* no upstream - branch not pushed yet, that's fine */ }
         gitInfo = { branch, dirty: status.length > 0, ahead, behind };
       } catch { /* not a git repo or dir doesn't exist */ }
     }
