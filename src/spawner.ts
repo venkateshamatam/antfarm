@@ -881,7 +881,7 @@ export function spawnCodexReview(card: Card, projectDir: string, dbPath: string,
 
   child.on('error', () => { releaseReviewSlot(); });
 
-  child.on('close', (code) => {
+  child.on('close', async (code) => {
     releaseReviewSlot();
     const db = initDatabase(dbPath);
     try {
@@ -950,7 +950,7 @@ export function spawnCodexReview(card: Card, projectDir: string, dbPath: string,
                       .run(buildingCol.id, nextCard.id);
                   }
 
-                  spawnImplementation(nextCard, board.directory, dbPath, {
+                  await spawnImplementation(nextCard, board.directory, dbPath, {
                     boardId: nextBoardId,
                     model: nextModel,
                     resumeSessionId: resumeId,
